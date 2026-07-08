@@ -1,0 +1,220 @@
+name: Publish Server (Linux + Windows + Docker)
+
+# Builds VpnHood SERVER from the monorepo code (vpnhood/VpnHood) and releases it to THIS repo
+# (vpnhood/VpnHood.App.Server). The code is NOT forked here — it is checked out at build time into
+# code/; this repo only holds the release plumbing (this workflow) + the Docker Hub secrets. The
+# monorepo remains the single source of code + version. This repo has only a `main` branch (no
+# develop line — there is no code here); the develop -> main prerelease/stable model lives in the
+# MONOREPO via bump.yml, and this workflow BUILDS FROM whatever monorepo ref it is given.
+#
+# Unlike Client/Connect the server has NO app store and NO fastlane. The only "store" is Docker Hub.
+#
+# Release procedure (see Pub/Server/PublishByGithub.ps1 in the monorepo):
+#   1. bump the MONOREPO (bump.yml, publish OFF) so PubVersion.json + CHANGELOG advance and push to
+#      develop (a STABLE bump also fast-forwards main). Then
+#   2. dispatch THIS workflow (ref input = the bumped monorepo branch, default develop). No bump and
+#      no NuGet happen here.
+#
+# The server Windows package is a plain self-contained `dotnet publish -r win-x64` + zip (no MSI, no
+# Advanced Installer), so it CROSS-BUILDS on ubuntu alongside Linux — one build job produces both.
+#
+# Secrets/variables (set on THIS repo):
+#   secrets.DOCKERHUB_USERNAME / DOCKERHUB_TOKEN   Docker Hub push. Absent -> the image push is
+#       SKIPPED with a warning (job stays green); the GitHub release still ships Linux/Windows.
+#   vars.DOCKER_IMAGE (optional)                   Docker Hub repo (default vpnhood/vpnhoodserver).
+#   vars.CODE_REPO (optional)                      Monorepo to build from (default vpnhood/VpnHood).
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Monorepo branch or commit to build (blank = develop)"
+        required: false
+        default: ""
+      publish_release:
+        description: "Create the GitHub release (on this Server repo)"
+        type: boolean
+        required: false
+        default: false
+      push_docker:
+        description: "Push the multi-arch image to Docker Hub (needs DOCKERHUB_* secrets)"
+        type: boolean
+        required: false
+        default: true
+
+# The server update-info URLs (baked into the published JSONs) and the release target both resolve to
+# THIS repo via VH_PUBLISH_REPO. github.repository == vpnhood/VpnHood.App.Server here.
+env:
+  VH_PUBLISH_REPO: ${{ github.repository }}
+  # The monorepo that holds the server source (public -> no checkout token needed).
+  CODE_REPO: ${{ vars.CODE_REPO || 'vpnhood/VpnHood' }}
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  # One ubuntu job builds BOTH Linux (x64/arm64/any + msquic) and Windows-x64 (self-contained zip),
+  # because the server has no MSI/Advanced-Installer step that would require a windows runner.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout monorepo code
+        uses: actions/checkout@v5
+        with: { repository: "${{ env.CODE_REPO }}", ref: "${{ github.event.inputs.ref || 'develop' }}", path: code }
+      - uses: actions/setup-dotnet@v5
+        with: { global-json-file: code/global.json }
+      - name: Resolve module dir
+        shell: pwsh
+        run: |
+          $v = Get-Content "$env:GITHUB_WORKSPACE/code/Pub/PubVersion.json" | ConvertFrom-Json
+          $tag = "v$($v.Version)" + ($(if ($v.Prerelease) { "-prerelease" } else { "" }))
+          "MODULE_DIR=code/Pub/bin/$tag/VpnHoodServer" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Credentials stub
+        shell: pwsh
+        run: |
+          $u = Join-Path $env:GITHUB_WORKSPACE ".user"
+          New-Item -ItemType Directory -Path $u -Force | Out-Null
+          '' | Out-File (Join-Path $u "nuget_api_key.txt") -Encoding ascii -Force
+      - name: Build server (Linux + Windows-x64)
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/code/Src/Apps/Server.Net/_publish.ps1"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: server-build
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            ${{ env.MODULE_DIR }}/linux-x64/**
+            ${{ env.MODULE_DIR }}/linux-arm64/**
+            ${{ env.MODULE_DIR }}/linux-any/**
+            ${{ env.MODULE_DIR }}/win-x64/**
+
+  # Generates the two docker-compose helper files (always) and pushes the multi-arch image to Docker
+  # Hub (gated on the DOCKERHUB_* secrets + the push_docker input). The Dockerfile builds portable IL,
+  # so a single buildx invocation covers amd64 + arm64.
+  build-docker:
+    runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE || 'vpnhood/vpnhoodserver' }}
+    steps:
+      - name: Checkout monorepo code
+        uses: actions/checkout@v5
+        with: { repository: "${{ env.CODE_REPO }}", ref: "${{ github.event.inputs.ref || 'develop' }}", path: code }
+      - uses: actions/setup-dotnet@v5
+        with: { global-json-file: code/global.json }
+      - name: Resolve module dir + docker tags
+        shell: pwsh
+        run: |
+          $v = Get-Content "$env:GITHUB_WORKSPACE/code/Pub/PubVersion.json" | ConvertFrom-Json
+          $tag = "v$($v.Version)" + ($(if ($v.Prerelease) { "-prerelease" } else { "" }))
+          "MODULE_DIR=code/Pub/bin/$tag/VpnHoodServer" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # Version tag always; :latest only on a STABLE release (not a prerelease).
+          $tags = "$env:DOCKER_IMAGE`:$tag"
+          if (-not $v.Prerelease) { $tags += ",$env:DOCKER_IMAGE`:latest" }
+          "DOCKER_TAGS=$tags" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Credentials stub
+        shell: pwsh
+        run: |
+          $u = Join-Path $env:GITHUB_WORKSPACE ".user"
+          New-Item -ItemType Directory -Path $u -Force | Out-Null
+          '' | Out-File (Join-Path $u "nuget_api_key.txt") -Encoding ascii -Force
+      # Compose helper files are release assets, so they are produced whether or not the image is pushed.
+      - name: Generate docker-compose helper files
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/code/Src/Apps/Server.Net/Pub/publish_docker.ps1" -distribute 0 -generateOnly 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: server-docker
+          if-no-files-found: error
+          retention-days: 1
+          path: ${{ env.MODULE_DIR }}/docker/**
+      - name: Warn if Docker Hub secrets are missing
+        if: env.DOCKERHUB_USERNAME == '' && github.event.inputs.push_docker != 'false'
+        run: echo "::warning title=Docker push skipped::DOCKERHUB_USERNAME/DOCKERHUB_TOKEN not set; the multi-arch image will NOT be pushed. The GitHub release still ships the Linux/Windows packages + compose files."
+      - name: Set up QEMU
+        if: env.DOCKERHUB_USERNAME != '' && github.event.inputs.push_docker != 'false'
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        if: env.DOCKERHUB_USERNAME != '' && github.event.inputs.push_docker != 'false'
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != '' && github.event.inputs.push_docker != 'false'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push multi-arch image
+        if: env.DOCKERHUB_USERNAME != '' && github.event.inputs.push_docker != 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: code
+          file: code/Src/Apps/Server.Net/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.DOCKER_TAGS }}
+
+  release:
+    needs: [build, build-docker]
+    if: >-
+      ${{ always()
+        && github.event.inputs.publish_release == 'true'
+        && needs.build.result == 'success'
+        && needs.build-docker.result != 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write   # to delete this run's artifacts in the final step
+    steps:
+      - name: Checkout monorepo code
+        uses: actions/checkout@v5
+        with: { repository: "${{ env.CODE_REPO }}", ref: "${{ github.event.inputs.ref || 'develop' }}", path: code }
+      - uses: actions/setup-dotnet@v5
+        with: { global-json-file: code/global.json }
+      - name: Resolve module dir
+        shell: pwsh
+        run: |
+          $v = Get-Content "$env:GITHUB_WORKSPACE/code/Pub/PubVersion.json" | ConvertFrom-Json
+          $tag = "v$($v.Version)" + ($(if ($v.Prerelease) { "-prerelease" } else { "" }))
+          # PublishToGithub.ps1 (via Common.ps1) reads assets from Pub/bin/latest on a STABLE release
+          # ($isLatest = -not Prerelease) and Pub/bin/<tag> on a prerelease. Download into the SAME
+          # folder it will read, so the folder name matches releaseRootDir in both cases.
+          $dir = if ($v.Prerelease) { "code/Pub/bin/$tag/VpnHoodServer" } else { "code/Pub/bin/latest/VpnHoodServer" }
+          "MODULE_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Credentials stub
+        shell: pwsh
+        run: |
+          $u = Join-Path $env:GITHUB_WORKSPACE ".user"
+          New-Item -ItemType Directory -Path $u -Force | Out-Null
+          '' | Out-File (Join-Path $u "nuget_api_key.txt") -Encoding ascii -Force
+      # Reassemble the layout PublishToGithub.ps1 expects (latest/ on stable, <tag>/ on prerelease).
+      - uses: actions/download-artifact@v8
+        with: { name: server-build, path: "${{ env.MODULE_DIR }}" }
+      - uses: actions/download-artifact@v8
+        with: { name: server-docker, path: "${{ env.MODULE_DIR }}/docker" }
+      - name: Create GitHub release (Server repo)
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          . "$env:GITHUB_WORKSPACE/code/Pub/Lib/ResolvePublishRepo.ps1"
+          & "$env:GITHUB_WORKSPACE/code/Pub/Lib/PublishToGithub.ps1" `
+            -packageDirName "VpnHoodServer" `
+            -repoName (Resolve-PublishRepoSlug) `
+            -dropChangelogTag "#client" `
+            -changelogFileName "CHANGELOG.Server.md" `
+            -assetSet "server"
+      - name: Delete this run's artifacts
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ids=$(gh api --paginate \
+            "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
+            --jq '.artifacts[].id')
+          if [ -z "$ids" ]; then echo "No artifacts to delete."; exit 0; fi
+          for id in $ids; do
+            echo "Deleting artifact id=$id"
+            gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" || true
+          done

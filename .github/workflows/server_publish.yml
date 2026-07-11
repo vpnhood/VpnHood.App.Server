@@ -9,7 +9,7 @@ name: Publish Server (Linux + Windows + Docker)
 #
 # Unlike Client/Connect the server has NO app store and NO fastlane. The only "store" is Docker Hub.
 #
-# Release procedure (see Pub/Server/PublishByGithub.ps1 in the monorepo):
+# Release procedure (see pub/Server/PublishByGithub.ps1 in the monorepo):
 #   1. bump the MONOREPO (bump.yml, publish OFF) so PubVersion.json + CHANGELOG advance and push to
 #      develop (a STABLE bump also fast-forwards main). Then
 #   2. dispatch THIS workflow (ref input = the bumped monorepo branch, default develop). No bump and
@@ -65,9 +65,9 @@ jobs:
       - name: Resolve module dir
         shell: pwsh
         run: |
-          $v = Get-Content "$env:GITHUB_WORKSPACE/code/Pub/PubVersion.json" | ConvertFrom-Json
+          $v = Get-Content "$env:GITHUB_WORKSPACE/code/pub/PubVersion.json" | ConvertFrom-Json
           $tag = "v$($v.Version)" + ($(if ($v.Prerelease) { "-prerelease" } else { "" }))
-          "MODULE_DIR=code/Pub/bin/$tag/VpnHoodServer" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MODULE_DIR=code/pub/bin/$tag/VpnHoodServer" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Credentials stub
         shell: pwsh
         run: |
@@ -77,7 +77,7 @@ jobs:
       - name: Build server (Linux + Windows-x64)
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE/code/Src/Apps/Server.Net/_publish.ps1"
+          & "$env:GITHUB_WORKSPACE/code/src/Apps/Server.Net/_publish.ps1"
       - uses: actions/upload-artifact@v7
         with:
           name: server-build
@@ -106,9 +106,9 @@ jobs:
       - name: Resolve module dir + docker tags
         shell: pwsh
         run: |
-          $v = Get-Content "$env:GITHUB_WORKSPACE/code/Pub/PubVersion.json" | ConvertFrom-Json
+          $v = Get-Content "$env:GITHUB_WORKSPACE/code/pub/PubVersion.json" | ConvertFrom-Json
           $tag = "v$($v.Version)" + ($(if ($v.Prerelease) { "-prerelease" } else { "" }))
-          "MODULE_DIR=code/Pub/bin/$tag/VpnHoodServer" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MODULE_DIR=code/pub/bin/$tag/VpnHoodServer" | Out-File -FilePath $env:GITHUB_ENV -Append
           # Version tag always; :latest only on a STABLE release (not a prerelease).
           $tags = "$env:DOCKER_IMAGE`:$tag"
           if (-not $v.Prerelease) { $tags += ",$env:DOCKER_IMAGE`:latest" }
@@ -123,7 +123,7 @@ jobs:
       - name: Generate docker-compose helper files
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE/code/Src/Apps/Server.Net/Pub/publish_docker.ps1" -distribute 0 -generateOnly 1
+          & "$env:GITHUB_WORKSPACE/code/src/Apps/Server.Net/pub/publish_docker.ps1" -distribute 0 -generateOnly 1
       - uses: actions/upload-artifact@v7
         with:
           name: server-docker
@@ -150,7 +150,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: code
-          file: code/Src/Apps/Server.Net/Dockerfile
+          file: code/src/Apps/Server.Net/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ env.DOCKER_TAGS }}
@@ -175,12 +175,12 @@ jobs:
       - name: Resolve module dir
         shell: pwsh
         run: |
-          $v = Get-Content "$env:GITHUB_WORKSPACE/code/Pub/PubVersion.json" | ConvertFrom-Json
+          $v = Get-Content "$env:GITHUB_WORKSPACE/code/pub/PubVersion.json" | ConvertFrom-Json
           $tag = "v$($v.Version)" + ($(if ($v.Prerelease) { "-prerelease" } else { "" }))
-          # PublishToGithub.ps1 (via Common.ps1) reads assets from Pub/bin/latest on a STABLE release
-          # ($isLatest = -not Prerelease) and Pub/bin/<tag> on a prerelease. Download into the SAME
+          # PublishToGithub.ps1 (via Common.ps1) reads assets from pub/bin/latest on a STABLE release
+          # ($isLatest = -not Prerelease) and pub/bin/<tag> on a prerelease. Download into the SAME
           # folder it will read, so the folder name matches releaseRootDir in both cases.
-          $dir = if ($v.Prerelease) { "code/Pub/bin/$tag/VpnHoodServer" } else { "code/Pub/bin/latest/VpnHoodServer" }
+          $dir = if ($v.Prerelease) { "code/pub/bin/$tag/VpnHoodServer" } else { "code/pub/bin/latest/VpnHoodServer" }
           "MODULE_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Credentials stub
         shell: pwsh
@@ -198,8 +198,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          . "$env:GITHUB_WORKSPACE/code/Pub/Lib/ResolvePublishRepo.ps1"
-          & "$env:GITHUB_WORKSPACE/code/Pub/Lib/PublishToGithub.ps1" `
+          . "$env:GITHUB_WORKSPACE/code/pub/Lib/ResolvePublishRepo.ps1"
+          & "$env:GITHUB_WORKSPACE/code/pub/Lib/PublishToGithub.ps1" `
             -packageDirName "VpnHoodServer" `
             -repoName (Resolve-PublishRepoSlug) `
             -dropChangelogTag "#client" `

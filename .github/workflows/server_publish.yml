@@ -177,7 +177,7 @@ jobs:
         run: |
           $v = Get-Content "$env:GITHUB_WORKSPACE/code/pub/PubVersion.json" | ConvertFrom-Json
           $tag = "v$($v.Version)" + ($(if ($v.Prerelease) { "-prerelease" } else { "" }))
-          # PublishToGithub.ps1 (via Common.ps1) reads assets from pub/bin/latest on a STABLE release
+          # Publish-GithubRelease.ps1 (via Common.ps1) reads assets from pub/bin/latest on a STABLE release
           # ($isLatest = -not Prerelease) and pub/bin/<tag> on a prerelease. Download into the SAME
           # folder it will read, so the folder name matches releaseRootDir in both cases.
           $dir = if ($v.Prerelease) { "code/pub/bin/$tag/VpnHoodServer" } else { "code/pub/bin/latest/VpnHoodServer" }
@@ -188,7 +188,7 @@ jobs:
           $u = Join-Path $env:GITHUB_WORKSPACE ".user"
           New-Item -ItemType Directory -Path $u -Force | Out-Null
           '' | Out-File (Join-Path $u "nuget_api_key.txt") -Encoding ascii -Force
-      # Reassemble the layout PublishToGithub.ps1 expects (latest/ on stable, <tag>/ on prerelease).
+      # Reassemble the layout Publish-GithubRelease.ps1 expects (latest/ on stable, <tag>/ on prerelease).
       - uses: actions/download-artifact@v8
         with: { name: server-build, path: "${{ env.MODULE_DIR }}" }
       - uses: actions/download-artifact@v8
@@ -198,8 +198,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          . "$env:GITHUB_WORKSPACE/code/pub/Lib/ResolvePublishRepo.ps1"
-          & "$env:GITHUB_WORKSPACE/code/pub/Lib/PublishToGithub.ps1" `
+          . "$env:GITHUB_WORKSPACE/code/pub/lib/Resolve-PublishRepo.ps1"
+          & "$env:GITHUB_WORKSPACE/code/pub/lib/Publish-GithubRelease.ps1" `
             -packageDirName "VpnHoodServer" `
             -repoName (Resolve-PublishRepoSlug) `
             -dropChangelogTag "#client" `

@@ -68,12 +68,6 @@ jobs:
           $v = Get-Content "$env:GITHUB_WORKSPACE/code/pub/PubVersion.json" | ConvertFrom-Json
           $tag = "v$($v.Version)" + ($(if ($v.Prerelease) { "-prerelease" } else { "" }))
           "MODULE_DIR=code/pub/bin/$tag/VpnHoodServer" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Credentials stub
-        shell: pwsh
-        run: |
-          $u = Join-Path $env:GITHUB_WORKSPACE ".user/vendors/nuget"
-          New-Item -ItemType Directory -Path $u -Force | Out-Null
-          '' | Out-File (Join-Path $u "nuget_api_key.txt") -Encoding ascii -Force
       - name: Build server (Linux + Windows-x64)
         shell: pwsh
         run: |
@@ -113,12 +107,6 @@ jobs:
           $tags = "$env:DOCKER_IMAGE`:$tag"
           if (-not $v.Prerelease) { $tags += ",$env:DOCKER_IMAGE`:latest" }
           "DOCKER_TAGS=$tags" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Credentials stub
-        shell: pwsh
-        run: |
-          $u = Join-Path $env:GITHUB_WORKSPACE ".user/vendors/nuget"
-          New-Item -ItemType Directory -Path $u -Force | Out-Null
-          '' | Out-File (Join-Path $u "nuget_api_key.txt") -Encoding ascii -Force
       # Compose helper files are release assets, so they are produced whether or not the image is pushed.
       - name: Generate docker-compose helper files
         shell: pwsh
@@ -182,12 +170,6 @@ jobs:
           # folder it will read, so the folder name matches releaseRootDir in both cases.
           $dir = if ($v.Prerelease) { "code/pub/bin/$tag/VpnHoodServer" } else { "code/pub/bin/latest/VpnHoodServer" }
           "MODULE_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Credentials stub
-        shell: pwsh
-        run: |
-          $u = Join-Path $env:GITHUB_WORKSPACE ".user/vendors/nuget"
-          New-Item -ItemType Directory -Path $u -Force | Out-Null
-          '' | Out-File (Join-Path $u "nuget_api_key.txt") -Encoding ascii -Force
       # Reassemble the layout Publish-GithubRelease.ps1 expects (latest/ on stable, <tag>/ on prerelease).
       - uses: actions/download-artifact@v8
         with: { name: server-build, path: "${{ env.MODULE_DIR }}" }

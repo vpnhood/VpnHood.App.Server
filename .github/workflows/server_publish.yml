@@ -71,7 +71,7 @@ jobs:
       - name: Credentials stub
         shell: pwsh
         run: |
-          $u = Join-Path $env:GITHUB_WORKSPACE ".user"
+          $u = Join-Path $env:GITHUB_WORKSPACE ".user/vendors/nuget"
           New-Item -ItemType Directory -Path $u -Force | Out-Null
           '' | Out-File (Join-Path $u "nuget_api_key.txt") -Encoding ascii -Force
       - name: Build server (Linux + Windows-x64)
@@ -116,7 +116,7 @@ jobs:
       - name: Credentials stub
         shell: pwsh
         run: |
-          $u = Join-Path $env:GITHUB_WORKSPACE ".user"
+          $u = Join-Path $env:GITHUB_WORKSPACE ".user/vendors/nuget"
           New-Item -ItemType Directory -Path $u -Force | Out-Null
           '' | Out-File (Join-Path $u "nuget_api_key.txt") -Encoding ascii -Force
       # Compose helper files are release assets, so they are produced whether or not the image is pushed.
@@ -185,7 +185,7 @@ jobs:
       - name: Credentials stub
         shell: pwsh
         run: |
-          $u = Join-Path $env:GITHUB_WORKSPACE ".user"
+          $u = Join-Path $env:GITHUB_WORKSPACE ".user/vendors/nuget"
           New-Item -ItemType Directory -Path $u -Force | Out-Null
           '' | Out-File (Join-Path $u "nuget_api_key.txt") -Encoding ascii -Force
       # Reassemble the layout Publish-GithubRelease.ps1 expects (latest/ on stable, <tag>/ on prerelease).

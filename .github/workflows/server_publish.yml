@@ -123,19 +123,19 @@ jobs:
         run: echo "::warning title=Docker push skipped::DOCKERHUB_USERNAME/DOCKERHUB_TOKEN not set; the multi-arch image will NOT be pushed. The GitHub release still ships the Linux/Windows packages + compose files."
       - name: Set up QEMU
         if: env.DOCKERHUB_USERNAME != '' && github.event.inputs.push_docker != 'false'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Set up Docker Buildx
         if: env.DOCKERHUB_USERNAME != '' && github.event.inputs.push_docker != 'false'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_USERNAME != '' && github.event.inputs.push_docker != 'false'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build and push multi-arch image
         if: env.DOCKERHUB_USERNAME != '' && github.event.inputs.push_docker != 'false'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: code
           file: code/src/Apps/Server.Net/Dockerfile

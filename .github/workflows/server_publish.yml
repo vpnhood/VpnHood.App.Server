@@ -58,9 +58,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout monorepo code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with: { repository: "${{ env.CODE_REPO }}", ref: "${{ github.event.inputs.ref || 'develop' }}", path: code }
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@v6
         with: { global-json-file: code/global.json }
       - name: Resolve module dir
         shell: pwsh
@@ -93,9 +93,9 @@ jobs:
       DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE || 'vpnhood/vpnhoodserver' }}
     steps:
       - name: Checkout monorepo code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with: { repository: "${{ env.CODE_REPO }}", ref: "${{ github.event.inputs.ref || 'develop' }}", path: code }
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@v6
         with: { global-json-file: code/global.json }
       - name: Resolve module dir + docker tags
         shell: pwsh
@@ -156,9 +156,9 @@ jobs:
       actions: write   # to delete this run's artifacts in the final step
     steps:
       - name: Checkout monorepo code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with: { repository: "${{ env.CODE_REPO }}", ref: "${{ github.event.inputs.ref || 'develop' }}", path: code }
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@v6
         with: { global-json-file: code/global.json }
       - name: Resolve module dir
         shell: pwsh

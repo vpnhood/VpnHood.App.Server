@@ -56,10 +56,16 @@ jobs:
   # because the server has no MSI/Advanced-Installer step that would require a windows runner.
   build:
     runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
     steps:
       - name: Checkout monorepo code
         uses: actions/checkout@v7
         with: { repository: "${{ env.CODE_REPO }}", ref: "${{ github.event.inputs.ref || 'develop' }}", path: code }
+      # The other jobs check out this commit, not the ref: a branch can move while the run goes on.
+      - name: Resolve the commit
+        id: sha
+        run: echo "sha=$(git -C code rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-dotnet@v6
         with: { global-json-file: code/global.json }
       - name: Resolve module dir
@@ -71,7 +77,7 @@ jobs:
       - name: Build server (Linux + Windows-x64)
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE/code/src/Apps/Server.Net/_publish.ps1"
+          & "$env:GITHUB_WORKSPACE/code/src/Apps/Server/_publish.ps1"
       - uses: actions/upload-artifact@v7
         with:
           name: server-build
@@ -84,17 +90,21 @@ jobs:
             ${{ env.MODULE_DIR }}/win-x64/**
 
   # Generates the two docker-compose helper files (always) and pushes the multi-arch image to Docker
-  # Hub (gated on the DOCKERHUB_* secrets + the push_docker input). The Dockerfile builds portable IL,
-  # so a single buildx invocation covers amd64 + arm64.
+  # Hub (gated on the DOCKERHUB_* secrets + the push_docker input). The image is a native install of
+  # the build job's Linux packages, one per architecture, from the context publish_docker.ps1 stages
+  # beside them, as a local build does; a single buildx invocation covers amd64 + arm64.
   build-docker:
+    needs: build
     runs-on: ubuntu-latest
+    outputs:
+      pushed: ${{ steps.push.outcome == 'success' }}
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE || 'vpnhood/vpnhoodserver' }}
     steps:
       - name: Checkout monorepo code
         uses: actions/checkout@v7
-        with: { repository: "${{ env.CODE_REPO }}", ref: "${{ github.event.inputs.ref || 'develop' }}", path: code }
+        with: { repository: "${{ env.CODE_REPO }}", ref: "${{ needs.build.outputs.sha }}", path: code }
       - uses: actions/setup-dotnet@v6
         with: { global-json-file: code/global.json }
       - name: Resolve module dir + docker tags
@@ -107,11 +117,14 @@ jobs:
           $tags = "$env:DOCKER_IMAGE`:$tag"
           if (-not $v.Prerelease) { $tags += ",$env:DOCKER_IMAGE`:latest" }
           "DOCKER_TAGS=$tags" | Out-File -FilePath $env:GITHUB_ENV -Append
+      # The packages, where publish_docker.ps1 looks for them to stage the image's build context.
+      - uses: actions/download-artifact@v8
+        with: { name: server-build, path: "${{ env.MODULE_DIR }}" }
       # Compose helper files are release assets, so they are produced whether or not the image is pushed.
-      - name: Generate docker-compose helper files
+      - name: Generate docker-compose helper files and the image's build context
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE/code/src/Apps/Server.Net/pub/publish_docker.ps1" -distribute 0 -generateOnly 1
+          & "$env:GITHUB_WORKSPACE/code/src/Apps/Server/pub/publish_docker.ps1" -distribute 0 -generateOnly 1
       - uses: actions/upload-artifact@v7
         with:
           name: server-docker
@@ -134,11 +147,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build and push multi-arch image
+        id: push
         if: env.DOCKERHUB_USERNAME != '' && github.event.inputs.push_docker != 'false'
         uses: docker/build-push-action@v7
         with:
-          context: code
-          file: code/src/Apps/Server.Net/Dockerfile
+          context: ${{ env.MODULE_DIR }}/docker-context
+          file: code/src/Apps/Server/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ env.DOCKER_TAGS }}
@@ -157,7 +171,7 @@ jobs:
     steps:
       - name: Checkout monorepo code
         uses: actions/checkout@v7
-        with: { repository: "${{ env.CODE_REPO }}", ref: "${{ github.event.inputs.ref || 'develop' }}", path: code }
+        with: { repository: "${{ env.CODE_REPO }}", ref: "${{ needs.build.outputs.sha }}", path: code }
       - uses: actions/setup-dotnet@v6
         with: { global-json-file: code/global.json }
       - name: Resolve module dir
@@ -175,6 +189,17 @@ jobs:
         with: { name: server-build, path: "${{ env.MODULE_DIR }}" }
       - uses: actions/download-artifact@v8
         with: { name: server-docker, path: "${{ env.MODULE_DIR }}/docker" }
+      # A container cannot take a release whose UpdateCode differs from the one it runs: it asks for the
+      # new image instead. Such a release goes out only with its image.
+      - name: Require the image for a new UpdateCode
+        if: needs.build-docker.outputs.pushed != 'true'
+        run: |
+          new=$(jq -r .UpdateCode "$MODULE_DIR/linux-x64/VpnHoodServer-linux-x64.json")
+          old=$(curl -fsSL "https://github.com/${{ github.repository }}/releases/latest/download/VpnHoodServer-linux-x64.json" | jq -r .UpdateCode) || old=""
+          if [ -n "$old" ] && [ "$new" != "$old" ]; then
+            echo "::error title=No image for a new UpdateCode::UpdateCode $old -> $new, and the image was not pushed: Docker servers could not take this release."
+            exit 1
+          fi
       - name: Create GitHub release (Server repo)
         shell: pwsh
         env:

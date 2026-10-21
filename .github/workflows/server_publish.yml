@@ -10,8 +10,8 @@ name: Publish Server (Linux + Windows + Docker)
 # Unlike Client/Connect the server has NO app store and NO fastlane. The only "store" is Docker Hub.
 #
 # Release procedure (see pub/Server/PublishByGithub.ps1 in the monorepo):
-#   1. bump the MONOREPO (bump.yml, publish OFF) so PubVersion.json + CHANGELOG advance and push to
-#      develop (a STABLE bump also fast-forwards main). Then
+#   1. bump the MONOREPO (bump.yml, NuGet publish OFF) so PubVersion.json advances and is pushed to
+#      develop (a STABLE bump also fast-forwards main); the CHANGELOG is hand-kept. Then
 #   2. dispatch THIS workflow (ref input = the bumped monorepo branch, default develop). No bump and
 #      no NuGet happen here.
 #
@@ -200,6 +200,7 @@ jobs:
             echo "::error title=No image for a new UpdateCode::UpdateCode $old -> $new, and the image was not pushed: Docker servers could not take this release."
             exit 1
           fi
+      # This repo holds no code: the tag pins this repo's commit, and the note names the monorepo's that was built.
       - name: Create GitHub release (Server repo)
         shell: pwsh
         env:
@@ -211,7 +212,9 @@ jobs:
             -repoName (Resolve-PublishRepoSlug) `
             -dropChangelogTag "#client" `
             -changelogFileName "CHANGELOG.Server.md" `
-            -assetSet "server"
+            -assetSet "server" `
+            -targetCommitish "${{ github.sha }}" `
+            -codeCommit "${{ needs.build.outputs.sha }}"
       - name: Delete this run's artifacts
         if: always()
         env:

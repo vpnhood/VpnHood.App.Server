@@ -77,7 +77,7 @@ jobs:
       - name: Build server (Linux + Windows-x64)
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE/code/src/Apps/Server/_publish.ps1"
+          & "$env:GITHUB_WORKSPACE/code/src/apps/Server/_publish.ps1"
       - uses: actions/upload-artifact@v7
         with:
           name: server-build
@@ -124,7 +124,7 @@ jobs:
       - name: Generate docker-compose helper files and the image's build context
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE/code/src/Apps/Server/pub/publish_docker.ps1" -distribute 0 -generateOnly 1
+          & "$env:GITHUB_WORKSPACE/code/src/apps/Server/pub/publish_docker.ps1" -distribute 0 -generateOnly 1
       - uses: actions/upload-artifact@v7
         with:
           name: server-docker
@@ -152,7 +152,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: ${{ env.MODULE_DIR }}/docker-context
-          file: code/src/Apps/Server/Dockerfile
+          file: code/src/apps/Server/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ env.DOCKER_TAGS }}
